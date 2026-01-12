@@ -6,7 +6,7 @@ import pytz
 app = Flask(__name__)
 swe.set_sid_mode(swe.SIDM_LAHIRI)
 
-# ================== CONSTANTS ==================
+# ================= TABLES =================
 
 NAKS = ["Ashwini","Bharani","Krittika","Rohini","Mrigashirsha","Ardra","Punarvasu","Pushya","Ashlesha","Magha",
         "Purva Phalguni","Uttara Phalguni","Hasta","Chitra","Swati","Vishakha","Anuradha","Jyeshtha","Mula",
@@ -28,12 +28,12 @@ YOGAS = ["Vishkambha","Priti","Ayushman","Saubhagya","Shobhana","Atiganda","Suka
          "Vyatipata","Variyana","Parigha","Shiva","Siddha","Sadhya","Shubha","Shukla",
          "Brahma","Indra","Vaidhriti"]
 
-# Drik Panchang Segments (SUNRISE based, Sun=0 .. Sat=6)
+# Drik Panchang segments (Sun=0 … Sat=6)
 RAHU_SEG   = [8,2,7,5,6,4,3]
 YAMA_SEG   = [5,4,3,2,1,7,6]
-GULIKA_SEG = [7,6,5,4,3,2,1]
+GULI_SEG   = [7,6,5,4,3,2,1]
 
-# ================== UTILITIES ==================
+# ================= UTILS =================
 
 def julian(dt):
     return swe.julday(dt.year,dt.month,dt.day,dt.hour+dt.minute/60+dt.second/3600)
@@ -41,27 +41,34 @@ def julian(dt):
 def jd_to_local(jd,tz):
     return datetime.fromtimestamp((jd-2440587.5)*86400,tz)
 
-def muhurta(sr, daymins, seg):
+def muhurta(sr,daymins,seg):
     part = daymins / 8
     start = sr + timedelta(minutes=seg * part)
     end   = start + timedelta(minutes=part)
     return start, end
 
-# ================== CORE ENGINE ==================
+def find_end(jd, fn):
+    base = fn(jd)
+    j = jd
+    for _ in range(1440):
+        j += 1/1440
+        if fn(j) != base:
+            return j
+    return j
+
+# ================= ENGINE =================
 
 def drik_panchang(date, lat, lon, tz):
     tzobj = pytz.timezone(tz)
-
-    # Always calculate from sunrise (Drik Panchang rule)
-    base = tzobj.localize(datetime(date.year, date.month, date.day, 6, 0, 0))
+    base = tzobj.localize(datetime(date.year,date.month,date.day,6,0,0))
     jd0 = julian(base)
-    geopos = (lon, lat, 0)
+    geo = (lon,lat,0)
 
-    sunrise_jd = swe.rise_trans(jd0, swe.SUN, swe.CALC_RISE, geopos)[1][0]
-    sunset_jd  = swe.rise_trans(jd0, swe.SUN, swe.CALC_SET, geopos)[1][0]
+    sr_jd = swe.rise_trans(jd0, swe.SUN, swe.CALC_RISE, geo)[1][0]
+    ss_jd = swe.rise_trans(jd0, swe.SUN, swe.CALC_SET, geo)[1][0]
 
-    sr = jd_to_local(sunrise_jd, tzobj)
-    ss = jd_to_local(sunset_jd, tzobj)
+    sr = jd_to_local(sr_jd, tzobj)
+    ss = jd_to_local(ss_jd, tzobj)
     daymins = (ss - sr).total_seconds() / 60
 
     jd = julian(sr)
@@ -71,15 +78,20 @@ def drik_panchang(date, lat, lon, tz):
 
     diff = (moon - sun) % 360
     tithi_i = int(diff / 12)
-    nak_i = int(moon / 13.333333)
-    yoga_i = int(((sun + moon) % 360) / 13.333333)
+    nak_i   = int(moon / 13.333333)
+    yoga_i  = int(((sun + moon) % 360) / 13.333333)
 
-    # 🌟 Correct Drik weekday (SUNRISE based)
-    weekday = (sr.weekday() + 1) % 7   # Sunday=0
+    # END TIMES (upto style)
+    tithi_end_jd = find_end(jd, lambda j: int(((swe.calc_ut(j,swe.MOON)[0][0] - swe.calc_ut(j,swe.SUN)[0][0]) % 360)/12))
+    nak_end_jd   = find_end(jd, lambda j: int((swe.calc_ut(j,swe.MOON)[0][0] % 360) / 13.333333))
+    yoga_end_jd  = find_end(jd, lambda j: int(((swe.calc_ut(j,swe.SUN)[0][0] + swe.calc_ut(j,swe.MOON)[0][0]) % 360) / 13.333333))
 
-    rahu_s, rahu_e = muhurta(sr, daymins, RAHU_SEG[weekday]-1)
-    yama_s, yama_e = muhurta(sr, daymins, YAMA_SEG[weekday]-1)
-    guli_s, guli_e = muhurta(sr, daymins, GULIKA_SEG[weekday]-1)
+    # Sunrise based weekday (Sun=0)
+    weekday = (sr.weekday() + 1) % 7
+
+    rahu_s,rahu_e = muhurta(sr,daymins,RAHU_SEG[weekday]-1)
+    yama_s,yama_e = muhurta(sr,daymins,YAMA_SEG[weekday]-1)
+    guli_s,guli_e = muhurta(sr,daymins,GULI_SEG[weekday]-1)
 
     mid = sr + timedelta(minutes=daymins/2)
     abh_s = mid - timedelta(minutes=24)
@@ -88,10 +100,10 @@ def drik_panchang(date, lat, lon, tz):
     return {
         "date": sr.strftime("%Y-%m-%d"),
         "day": sr.strftime("%A"),
-        "tithi": TITHI[tithi_i],
-        "nakshatra": NAKS[nak_i],
-        "yoga": YOGAS[yoga_i],
-        "paksha": "Krishna" if tithi_i >= 15 else "Shukla",
+        "tithi": f"{TITHI[tithi_i]} upto {jd_to_local(tithi_end_jd,tzobj).strftime('%H:%M:%S')}",
+        "nakshatra": f"{NAKS[nak_i]} upto {jd_to_local(nak_end_jd,tzobj).strftime('%H:%M:%S')}",
+        "yoga": f"{YOGAS[yoga_i]} upto {jd_to_local(yoga_end_jd,tzobj).strftime('%H:%M:%S')}",
+        "paksha": "Krishna" if tithi_i>=15 else "Shukla",
         "sunrise": sr.strftime("%H:%M:%S"),
         "sunset": ss.strftime("%H:%M:%S"),
         "moon_rashi": RASHI[int(moon/30)],
@@ -101,7 +113,7 @@ def drik_panchang(date, lat, lon, tz):
         "abhijit": f"{abh_s.strftime('%H:%M:%S')} - {abh_e.strftime('%H:%M:%S')}"
     }
 
-# ================== API ==================
+# ================= API =================
 
 @app.route("/panchang")
 def api():
