@@ -1,81 +1,81 @@
 import swisseph as swe
 from flask import Flask, request, jsonify
-from datetime import datetime
-import pytz
+from datetime import datetime, timedelta
+import pytz, math
 
 app = Flask(__name__)
-
-# Lahiri Ayanamsa (Drik Panchang standard)
 swe.set_sid_mode(swe.SIDM_LAHIRI)
 
-NAKS = [
-    "Ashwini","Bharani","Krittika","Rohini","Mrigashirsha","Ardra","Punarvasu",
-    "Pushya","Ashlesha","Magha","Purva Phalguni","Uttara Phalguni","Hasta","Chitra",
-    "Swati","Vishakha","Anuradha","Jyeshtha","Mula","Purva Ashadha","Uttara Ashadha",
-    "Shravana","Dhanishta","Shatabhisha","Purva Bhadrapada","Uttara Bhadrapada","Revati"
-]
+NAKS = ["Ashwini","Bharani","Krittika","Rohini","Mrigashirsha","Ardra","Punarvasu","Pushya","Ashlesha","Magha",
+        "Purva Phalguni","Uttara Phalguni","Hasta","Chitra","Swati","Vishakha","Anuradha","Jyeshtha","Mula",
+        "Purva Ashadha","Uttara Ashadha","Shravana","Dhanishta","Shatabhisha","Purva Bhadrapada","Uttara Bhadrapada","Revati"]
 
-# 30 Tithi (15 Shukla + 15 Krishna)
-TITHI = [
-    "Pratipada","Dvitiya","Tritiya","Chaturthi","Panchami","Shashthi","Saptami","Ashtami",
-    "Navami","Dashami","Ekadashi","Dwadashi","Trayodashi","Chaturdashi","Purnima",
-    "Pratipada","Dvitiya","Tritiya","Chaturthi","Panchami","Shashthi","Saptami","Ashtami",
-    "Navami","Dashami","Ekadashi","Dwadashi","Trayodashi","Chaturdashi","Amavasya"
-]
+TITHI = ["Pratipada","Dvitiya","Tritiya","Chaturthi","Panchami","Shashthi","Saptami","Ashtami","Navami","Dashami",
+         "Ekadashi","Dwadashi","Trayodashi","Chaturdashi","Purnima",
+         "Pratipada","Dvitiya","Tritiya","Chaturthi","Panchami","Shashthi","Saptami","Ashtami","Navami","Dashami",
+         "Ekadashi","Dwadashi","Trayodashi","Chaturdashi","Amavasya"]
+
+KARANA = ["Bava","Balava","Kaulava","Taitila","Garija","Vanija","Vishti"] * 5
+
+RASHI = ["Mesha","Vrishabha","Mithuna","Karka","Simha","Kanya","Tula","Vrischika","Dhanu","Makara","Kumbha","Meena"]
+RITU = ["Vasanta","Grishma","Varsha","Sharad","Hemanta","Shishir"]
 
 def julian(dt):
-    return swe.julday(
-        dt.year, dt.month, dt.day,
-        dt.hour + dt.minute/60 + dt.second/3600
-    )
+    return swe.julday(dt.year,dt.month,dt.day,dt.hour+dt.minute/60+dt.second/3600)
+
+def find_end(jd, fn, step=1/1440):
+    v = fn(jd)
+    j = jd
+    while True:
+        j += step
+        if fn(j) != v:
+            return j
 
 @app.route("/panchang")
 def panchang():
-    try:
-        lat = float(request.args.get("lat",22.57))
-        lon = float(request.args.get("lon",88.36))
-        tz  = request.args.get("tz","Asia/Kolkata")
+    tz = request.args.get("tz","Asia/Kolkata")
+    tzobj = pytz.timezone(tz)
+    now = datetime.now(tzobj)
+    jd = julian(now)
 
-        tzobj = pytz.timezone(tz)
-        now = datetime.now(tzobj)
+    sun = swe.calc_ut(jd,swe.SUN)[0][0]
+    moon = swe.calc_ut(jd,swe.MOON)[0][0]
 
-        jd = julian(now)
+    diff = (moon - sun) % 360
+    tithiIndex = min(29,int(diff/12))
+    nakIndex = int(moon/13.333333)%27
+    yogaIndex = int(((sun+moon)%360)/13.333333)
 
-        # Swiss Ephemeris Sidereal Positions
-        sun = swe.calc_ut(jd, swe.SUN)[0][0]
-        moon = swe.calc_ut(jd, swe.MOON)[0][0]
+    tithiEnd = find_end(jd, lambda j: int(((swe.calc_ut(j,swe.MOON)[0][0] - swe.calc_ut(j,swe.SUN)[0][0])%360)/12))
+    nakEnd = find_end(jd, lambda j: int(swe.calc_ut(j,swe.MOON)[0][0]/13.333333))
+    yogaEnd = find_end(jd, lambda j: int(((swe.calc_ut(j,swe.SUN)[0][0]+swe.calc_ut(j,swe.MOON)[0][0])%360)/13.333333))
 
-        # ---------- DRIC PANCHANG CORE ----------
-        diff = (moon - sun) % 360.0
+    sunrise = swe.rise_trans(jd, swe.SUN, swe.CALC_RISE)[1]
+    sunset  = swe.rise_trans(jd, swe.SUN, swe.CALC_SET)[1]
 
-        # Tithi (safe clamp)
-        tithiIndex = int(diff / 12.0)
-        if tithiIndex < 0: tithiIndex = 0
-        if tithiIndex > 29: tithiIndex = 29
+    moonrise = swe.rise_trans(jd, swe.MOON, swe.CALC_RISE)[1]
+    moonset  = swe.rise_trans(jd, swe.MOON, swe.CALC_SET)[1]
 
-        # Nakshatra (safe clamp)
-        nakIndex = int(moon / 13.333333) % 27
+    sr = datetime.fromtimestamp((sunrise-2440587.5)*86400, tzobj)
+    ss = datetime.fromtimestamp((sunset-2440587.5)*86400, tzobj)
 
-        # Yoga
-        yogaIndex = int(((sun + moon) % 360.0) / 13.333333)
-        if yogaIndex < 0: yogaIndex = 0
-        if yogaIndex > 26: yogaIndex = 26
+    daymins = (ss-sr).seconds/60
+    rahu = (sr+timedelta(minutes=78), sr+timedelta(minutes=166))
+    abhijit = (sr+timedelta(minutes=daymins/2-24), sr+timedelta(minutes=daymins/2+24))
 
-        # Paksha
-        paksha = "Shukla" if tithiIndex < 15 else "Krishna"
-
-        return jsonify({
-            "engine": "Swiss Ephemeris + Lahiri (Drik Panchang)",
-            "time": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "panchang":{
-                "tithi": TITHI[tithiIndex],
-                "paksha": paksha,
-                "nakshatra": NAKS[nakIndex],
-                "yoga": yogaIndex + 1,
-                "sun_longitude": round(sun,6),
-                "moon_longitude": round(moon,6)
-            }
-        })
-
-    except Exception as e:
-        return jsonify({"error":"Panchang Engine Error","details":str(e)}),500
+    return jsonify({
+        "tithi":TITHI[tithiIndex],
+        "tithi_end":str(datetime.fromtimestamp((tithiEnd-2440587.5)*86400, tzobj).time()),
+        "nakshatra":NAKS[nakIndex],
+        "nakshatra_end":str(datetime.fromtimestamp((nakEnd-2440587.5)*86400, tzobj).time()),
+        "karana":KARANA[tithiIndex*2 % len(KARANA)],
+        "paksha":"Shukla" if tithiIndex<15 else "Krishna",
+        "yoga":yogaIndex+1,
+        "yoga_end":str(datetime.fromtimestamp((yogaEnd-2440587.5)*86400, tzobj).time()),
+        "sunrise":sr.time().isoformat(),
+        "sunset":ss.time().isoformat(),
+        "rahu_kaal":f"{rahu[0].time()} - {rahu[1].time()}",
+        "abhijit":f"{abhijit[0].time()} - {abhijit[1].time()}",
+        "moon_rashi":RASHI[int(moon/30)%12],
+        "ritu":RITU[int(sun/60)%6]
+    })
