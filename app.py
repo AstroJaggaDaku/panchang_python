@@ -24,12 +24,10 @@ RASHI = ["Mesha","Vrishabha","Mithuna","Karka","Simha","Kanya","Tula","Vrischika
 RITU = ["Vasanta","Grishma","Varsha","Sharad","Hemanta","Shishir"]
 AMANTA = ["Chaitra","Vaisakha","Jyeshtha","Ashadha","Shravana","Bhadrapada","Ashwin","Kartika","Margashirsha","Pausha","Magha","Phalguna"]
 
-# Rahu / Yama / Gulika segments (Mon=0 .. Sun=6)
 RAHU_SEG   = [2,7,5,6,4,3,8]
 YAMA_SEG   = [3,2,1,0,6,5,4]
 GULIKA_SEG = [5,4,3,2,1,0,6]
 
-# Choghadiya table
 CHOGH = [
  ["Amrit","Kaal","Shubh","Rog","Udveg","Chal","Labh","Amrit"],
  ["Rog","Udveg","Chal","Labh","Amrit","Kaal","Shubh","Rog"],
@@ -42,8 +40,7 @@ CHOGH = [
 
 # ---------- Helpers ----------
 
-def safe(arr,i):
-    return arr[int(i)%len(arr)]
+def safe(arr,i): return arr[int(i)%len(arr)]
 
 def julian(dt):
     return swe.julday(dt.year,dt.month,dt.day,dt.hour+dt.minute/60+dt.second/3600)
@@ -73,9 +70,16 @@ def panchang():
         lat=float(request.args.get("lat",22.57))
         lon=float(request.args.get("lon",88.36))
         tz=request.args.get("tz","Asia/Kolkata")
-
         tzobj=pytz.timezone(tz)
-        now=datetime.now(tzobj)
+
+        # 🔥 FIX: Date support for Monthly / Festival
+        date_str=request.args.get("date")
+        if date_str:
+            y,m,d=map(int,date_str.split("-"))
+            now=tzobj.localize(datetime(y,m,d,12,0,0))   # noon prevents edge bugs
+        else:
+            now=datetime.now(tzobj)
+
         jd=julian(now)
         geopos=(lon,lat,0)
 
@@ -97,7 +101,6 @@ def panchang():
         sr=jd_to_local(sunrise,tzobj)
         ss=jd_to_local(sunset,tzobj)
         daymins=(ss-sr).total_seconds()/60
-
         wd=now.weekday()
 
         rahu_s,rahu_e=muhurta(sr,daymins,RAHU_SEG[wd])
@@ -113,6 +116,7 @@ def panchang():
         if seg>7: seg=7
 
         return jsonify({
+            "date": now.strftime("%Y-%m-%d"),
             "tithi":safe(TITHI,tithiIndex),
             "tithi_end":jd_to_local(tithiEnd,tzobj).strftime("%H:%M:%S"),
             "nakshatra":safe(NAKS,nakIndex),
