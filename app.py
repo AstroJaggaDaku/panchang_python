@@ -1,7 +1,7 @@
 import swisseph as swe
 from flask import Flask, request, jsonify
 from datetime import datetime
-import pytz, math
+import pytz
 
 app = Flask(__name__)
 swe.set_sid_mode(swe.SIDM_LAHIRI)
@@ -23,23 +23,19 @@ def panchang():
     j = julian(now)
 
     sun = swe.calc_ut(j, swe.SUN)[0][0]
-    moon= swe.calc_ut(j, swe.MOON)[0][0]
+    moon = swe.calc_ut(j, swe.MOON)[0][0]
 
     diff = (moon - sun + 360) % 360
-
-    tithiIndex = int(diff/12)
-    nakIndex = int(moon/13.333333)
-    yogaIndex = int(((sun+moon)%360)/13.333333)
+    tithiIndex = int(diff / 12)
+    nakIndex = int(moon / 13.333333)
+    yogaIndex = int(((sun + moon) % 360) / 13.333333)
 
     return jsonify({
-        "panchang":{
-            "tithi":TITHI[tithiIndex],
-            "nakshatra":NAKS[nakIndex],
-            "yoga":yogaIndex+1,
-            "sun_longitude":sun,
-            "moon_longitude":moon
+        "panchang": {
+            "tithi": TITHI[tithiIndex],
+            "nakshatra": NAKS[nakIndex],
+            "yoga": yogaIndex + 1,
+            "sun_longitude": sun,
+            "moon_longitude": moon
         }
     })
-
-if __name__ == "__main__":
-    app.run()
