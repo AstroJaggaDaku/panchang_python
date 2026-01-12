@@ -2,12 +2,11 @@ import swisseph as swe
 from flask import Flask, request, jsonify
 from datetime import datetime, timedelta
 import pytz
-import math
 
 app = Flask(__name__)
 swe.set_sid_mode(swe.SIDM_LAHIRI)
 
-# ---------------- CONSTANT TABLES ----------------
+# ================= TABLES =================
 
 TITHI = [
  "Pratipada","Dvitiya","Tritiya","Chaturthi","Panchami","Shashthi","Saptami","Ashtami",
@@ -16,6 +15,7 @@ TITHI = [
  "Navami","Dashami","Ekadashi","Dwadashi","Trayodashi","Chaturdashi","Amavasya"
 ]
 
+# 60 Karana system (AstroSage standard)
 KARANA = (["Bava","Balava","Kaulava","Taitila","Garaja","Vanija","Vishti"] * 8) + \
          ["Shakuni","Chatushpada","Naga","Kimstughna"]
 
@@ -37,7 +37,7 @@ RAHU=[8,2,7,5,6,4,3]
 YAMA=[5,4,3,2,1,7,6]
 GULI=[7,6,5,4,3,2,1]
 
-# ---------------- SAFE WRAPPERS ----------------
+# ================= SAFE WRAPPERS =================
 
 def safe_calc(jd, planet):
     try:
@@ -54,22 +54,24 @@ def safe_rise(jd, planet, flag, geo):
         pass
     return None
 
-# ---------------- TIME UTILS ----------------
+# ================= TIME =================
 
 def jd(dt):
-    return swe.julday(dt.year,dt.month,dt.day,dt.hour+dt.minute/60+dt.second/3600)
+    return swe.julday(dt.year,dt.month,dt.day,
+                      dt.hour+dt.minute/60+dt.second/3600)
 
 def from_jd(jd,tz):
     return datetime.fromtimestamp((jd-2440587.5)*86400,tz)
 
-# ---------------- TRUE RISE/SET (AstroSage) ----------------
+# ================= TRUE RISE / SET =================
+
+FLAG = swe.BIT_DISC_CENTER | swe.BIT_TOPOCTR
 
 def sunrise(date,lat,lon,tz):
     geo=(lon,lat,0)
     base=tz.localize(datetime(date.year,date.month,date.day,5))
     for h in [0,1,-1]:
-        j = safe_rise(jd(base+timedelta(hours=h)),swe.SUN,
-            swe.CALC_RISE|swe.BIT_DISC_CENTER|swe.BIT_REFRACTION|swe.BIT_TOPOCTR, geo)
+        j = safe_rise(jd(base+timedelta(hours=h)),swe.SUN,swe.CALC_RISE|FLAG,geo)
         if j: return from_jd(j,tz)
     raise Exception("Sunrise failed")
 
@@ -77,8 +79,7 @@ def sunset(date,lat,lon,tz):
     geo=(lon,lat,0)
     base=tz.localize(datetime(date.year,date.month,date.day,12))
     for h in [0,1,-1]:
-        j = safe_rise(jd(base+timedelta(hours=h)),swe.SUN,
-            swe.CALC_SET|swe.BIT_DISC_CENTER|swe.BIT_REFRACTION|swe.BIT_TOPOCTR, geo)
+        j = safe_rise(jd(base+timedelta(hours=h)),swe.SUN,swe.CALC_SET|FLAG,geo)
         if j: return from_jd(j,tz)
     raise Exception("Sunset failed")
 
@@ -86,12 +87,11 @@ def moon_event(date,lat,lon,tz,flag):
     geo=(lon,lat,0)
     base=tz.localize(datetime(date.year,date.month,date.day,6))
     for h in [0,1,-1]:
-        j = safe_rise(jd(base+timedelta(hours=h)),swe.MOON,
-            flag|swe.BIT_DISC_CENTER|swe.BIT_REFRACTION|swe.BIT_TOPOCTR, geo)
+        j = safe_rise(jd(base+timedelta(hours=h)),swe.MOON,flag|FLAG,geo)
         if j: return from_jd(j,tz)
     return None
 
-# ---------------- SOLVER ----------------
+# ================= SOLVERS =================
 
 def ang(a,b): return (a-b)%360
 
@@ -108,10 +108,11 @@ def solve(start,target,fn):
             lo=mid
     return hi
 
-# ---------------- PANCHANG ----------------
+# ================= PANCHANG =================
 
 def panchang(date,lat,lon,tzname):
     tz=pytz.timezone(tzname)
+
     sr=sunrise(date,lat,lon,tz)
     ss=sunset(date,lat,lon,tz)
 
@@ -123,13 +124,13 @@ def panchang(date,lat,lon,tzname):
     n=int(moon/13.3333333333)
     y=int(((sun+moon)%360)/13.3333333333)
 
-    t_end=solve(j0,(t+1)*12,lambda j: ang(*sun_moon(j)[::-1]))
+    t_end=solve(j0,(t+1)*12,lambda j: ang(sun_moon(j)[1],sun_moon(j)[0]))
     n_end=solve(j0,(n+1)*13.3333333333,lambda j: sun_moon(j)[1]%360)
     y_end=solve(j0,(y+1)*13.3333333333,lambda j: (sun_moon(j)[0]+sun_moon(j)[1])%360)
 
     kar=KARANA[int(diff/6)%60]
 
-    ama=solve(j0,0,lambda j: ang(*sun_moon(j)[::-1]))
+    ama=solve(j0,0,lambda j: ang(sun_moon(j)[1],sun_moon(j)[0]))
     sun_ama=sun_moon(ama)[0]
     amanta=AMANTA[int(sun_ama/30)]
     purni=AMANTA[(int(sun_ama/30)+1)%12]
@@ -177,7 +178,7 @@ def panchang(date,lat,lon,tzname):
       "abhijit":f"{abh[0].strftime('%H:%M:%S')} - {abh[1].strftime('%H:%M:%S')}"
     }
 
-# ---------------- API ----------------
+# ================= API =================
 
 @app.route("/panchang")
 def api():
