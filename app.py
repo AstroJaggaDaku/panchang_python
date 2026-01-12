@@ -6,7 +6,7 @@ import pytz
 app = Flask(__name__)
 swe.set_sid_mode(swe.SIDM_LAHIRI)
 
-# ---------- TABLES ----------
+# ---------------- TABLES ----------------
 
 NAKS = ["Ashwini","Bharani","Krittika","Rohini","Mrigashirsha","Ardra","Punarvasu","Pushya","Ashlesha","Magha",
         "Purva Phalguni","Uttara Phalguni","Hasta","Chitra","Swati","Vishakha","Anuradha","Jyeshtha","Mula",
@@ -19,123 +19,128 @@ TITHI = [
  "Navami","Dashami","Ekadashi","Dwadashi","Trayodashi","Chaturdashi","Amavasya"
 ]
 
-KARANA = ["Bava","Balava","Kaulava","Taitila","Garija","Vanija","Vishti"] * 5
 RASHI = ["Mesha","Vrishabha","Mithuna","Karka","Simha","Kanya","Tula","Vrischika","Dhanu","Makara","Kumbha","Meena"]
-RITU = ["Vasanta","Grishma","Varsha","Sharad","Hemanta","Shishir"]
-AMANTA = ["Chaitra","Vaisakha","Jyeshtha","Ashadha","Shravana","Bhadrapada","Ashwin","Kartika","Margashirsha","Pausha","Magha","Phalguna"]
 
-RAHU_SEG   = [2,7,5,6,4,3,8]
-YAMA_SEG   = [3,2,1,0,6,5,4]
-GULIKA_SEG = [5,4,3,2,1,0,6]
+# Rahu/Yama/Gulika – Drik Panchang standard
+RAHU_SEG=[1,6,4,5,3,2,0]
+YAMA_SEG=[4,3,2,1,0,6,5]
+GULI_SEG=[6,5,4,3,2,1,0]
 
-CHOGH = [
- ["Amrit","Kaal","Shubh","Rog","Udveg","Chal","Labh","Amrit"],
- ["Rog","Udveg","Chal","Labh","Amrit","Kaal","Shubh","Rog"],
- ["Shubh","Rog","Udveg","Chal","Labh","Amrit","Kaal","Shubh"],
- ["Chal","Labh","Amrit","Kaal","Shubh","Rog","Udveg","Chal"],
- ["Labh","Amrit","Kaal","Shubh","Rog","Udveg","Chal","Labh"],
- ["Kaal","Shubh","Rog","Udveg","Chal","Labh","Amrit","Kaal"],
- ["Udveg","Chal","Labh","Amrit","Kaal","Shubh","Rog","Udveg"]
-]
+YOGAS = ["Vishkambha","Priti","Ayushman","Saubhagya","Shobhana","Atiganda","Sukarma","Dhriti",
+         "Shoola","Ganda","Vriddhi","Dhruva","Vyaghata","Harshana","Vajra","Siddhi","Vyatipata",
+         "Variyana","Parigha","Shiva","Siddha","Sadhya","Shubha","Shukla","Brahma","Indra","Vaidhriti"]
 
-# ---------- Helpers ----------
-
-def safe(arr,i): return arr[int(i)%len(arr)]
+# ---------------- UTILS ----------------
 
 def julian(dt):
-    return swe.julday(dt.year,dt.month,dt.day,dt.hour+dt.minute/60+dt.second/3600)
+    return swe.julday(dt.year,dt.month,dt.day,dt.hour+dt.minute/60)
 
 def jd_to_local(jd,tz):
     return datetime.fromtimestamp((jd-2440587.5)*86400,tz)
 
-def find_end(jd,fn):
-    base=fn(jd)
-    j=jd
-    for _ in range(1440):
-        j+=1/1440
-        if fn(j)!=base:
-            return j
-    return j
-
 def muhurta(sr,daymins,seg):
-    start=sr+timedelta(minutes=seg*daymins/8)
-    end=sr+timedelta(minutes=(seg+1)*daymins/8)
-    return start,end
+    return (
+      sr+timedelta(minutes=seg*daymins/8),
+      sr+timedelta(minutes=(seg+1)*daymins/8)
+    )
 
-# ---------- API ----------
+# Core Panchang Calculator
+def calc_panchang(date, lat, lon, tz):
+    tzobj=pytz.timezone(tz)
+    base=tzobj.localize(datetime(date.year,date.month,date.day,6,0,0))
+    jd0=julian(base)
+    geopos=(lon,lat,0)
+
+    sunrise=swe.rise_trans(jd0,swe.SUN,swe.CALC_RISE,geopos)[1][0]
+    sunset =swe.rise_trans(jd0,swe.SUN,swe.CALC_SET,geopos)[1][0]
+
+    sr=jd_to_local(sunrise,tzobj)
+    ss=jd_to_local(sunset,tzobj)
+    daymins=(ss-sr).total_seconds()/60
+
+    jd=julian(sr)
+
+    sun=swe.calc_ut(jd,swe.SUN)[0][0]%360
+    moon=swe.calc_ut(jd,swe.MOON)[0][0]%360
+
+    diff=(moon-sun)%360
+    tithiIndex=int(diff/12)
+    nakIndex=int(moon/13.333333)
+    yogaIndex=int((sun+moon)%360/13.333333)
+
+    wd=sr.weekday()
+
+    rahu_s,rahu_e=muhurta(sr,daymins,RAHU_SEG[wd])
+    yama_s,yama_e=muhurta(sr,daymins,YAMA_SEG[wd])
+    gul_s ,gul_e =muhurta(sr,daymins,GULI_SEG[wd])
+
+    mid=sr+timedelta(minutes=daymins/2)
+    abh_s=mid-timedelta(minutes=24)
+    abh_e=mid+timedelta(minutes=24)
+
+    return {
+      "date":sr.strftime("%Y-%m-%d"),
+      "day":sr.strftime("%A"),
+      "tithi":TITHI[tithiIndex],
+      "nakshatra":NAKS[nakIndex],
+      "yoga":YOGAS[yogaIndex],
+      "paksha":"Krishna" if tithiIndex>=15 else "Shukla",
+      "sunrise":sr.strftime("%H:%M:%S"),
+      "sunset":ss.strftime("%H:%M:%S"),
+      "moon_rashi":RASHI[int(moon/30)],
+      "rahu_kaal":f"{rahu_s.strftime('%H:%M:%S')} - {rahu_e.strftime('%H:%M:%S')}",
+      "yamaganda":f"{yama_s.strftime('%H:%M:%S')} - {yama_e.strftime('%H:%M:%S')}",
+      "gulika":f"{gul_s.strftime('%H:%M:%S')} - {gul_e.strftime('%H:%M:%S')}",
+      "abhijit":f"{abh_s.strftime('%H:%M:%S')} - {abh_e.strftime('%H:%M:%S')}"
+    }
+
+# ---------------- API ----------------
 
 @app.route("/panchang")
-def panchang():
-    try:
-        lat=float(request.args.get("lat",22.57))
-        lon=float(request.args.get("lon",88.36))
-        tz=request.args.get("tz","Asia/Kolkata")
-        tzobj=pytz.timezone(tz)
+def daily():
+    lat=float(request.args.get("lat",22.57))
+    lon=float(request.args.get("lon",88.36))
+    tz=request.args.get("tz","Asia/Kolkata")
+    date=request.args.get("date")
 
-        # 🔥 FIX: Date support for Monthly / Festival
-        date_str=request.args.get("date")
-        if date_str:
-            y,m,d=map(int,date_str.split("-"))
-            now=tzobj.localize(datetime(y,m,d,12,0,0))   # noon prevents edge bugs
-        else:
-            now=datetime.now(tzobj)
+    if date:
+        y,m,d=map(int,date.split("-"))
+        dt=datetime(y,m,d)
+    else:
+        dt=datetime.now(pytz.timezone(tz))
 
-        jd=julian(now)
-        geopos=(lon,lat,0)
+    return jsonify(calc_panchang(dt,lat,lon,tz))
 
-        sun=swe.calc_ut(jd,swe.SUN)[0][0]%360
-        moon=swe.calc_ut(jd,swe.MOON)[0][0]%360
+@app.route("/panchang/month")
+def month():
+    lat=float(request.args.get("lat",22.57))
+    lon=float(request.args.get("lon",88.36))
+    tz=request.args.get("tz","Asia/Kolkata")
+    year=int(request.args.get("year"))
+    month=int(request.args.get("month"))
 
-        diff=(moon-sun)%360
-        tithiIndex=int(diff/12)
-        nakIndex=int(moon/13.333333)
-        yogaIndex=int((sun+moon)%360/13.333333)
+    days=[]
+    d=datetime(year,month,1)
+    while d.month==month:
+        days.append(calc_panchang(d,lat,lon,tz))
+        d+=timedelta(days=1)
 
-        tithiEnd=find_end(jd,lambda j:int(((swe.calc_ut(j,swe.MOON)[0][0]-swe.calc_ut(j,swe.SUN)[0][0])%360)/12))
-        nakEnd=find_end(jd,lambda j:int((swe.calc_ut(j,swe.MOON)[0][0]%360)/13.333333))
-        yogaEnd=find_end(jd,lambda j:int(((swe.calc_ut(j,swe.SUN)[0][0]+swe.calc_ut(j,swe.MOON)[0][0])%360)/13.333333))
+    return jsonify(days)
 
-        sunrise=swe.rise_trans(jd,swe.SUN,swe.CALC_RISE,geopos)[1][0]
-        sunset=swe.rise_trans(jd,swe.SUN,swe.CALC_SET,geopos)[1][0]
+@app.route("/panchang/festivals")
+def festivals():
+    lat=float(request.args.get("lat",22.57))
+    lon=float(request.args.get("lon",88.36))
+    tz=request.args.get("tz","Asia/Kolkata")
+    year=int(request.args.get("year"))
+    month=int(request.args.get("month"))
 
-        sr=jd_to_local(sunrise,tzobj)
-        ss=jd_to_local(sunset,tzobj)
-        daymins=(ss-sr).total_seconds()/60
-        wd=now.weekday()
+    out=[]
+    d=datetime(year,month,1)
+    while d.month==month:
+        p=calc_panchang(d,lat,lon,tz)
+        if p["tithi"] in ["Amavasya","Purnima","Ekadashi","Chaturthi"]:
+            out.append(p)
+        d+=timedelta(days=1)
 
-        rahu_s,rahu_e=muhurta(sr,daymins,RAHU_SEG[wd])
-        yama_s,yama_e=muhurta(sr,daymins,YAMA_SEG[wd])
-        gulika_s,gulika_e=muhurta(sr,daymins,GULIKA_SEG[wd])
-
-        mid=sr+timedelta(minutes=daymins/2)
-        abh_s=mid-timedelta(minutes=24)
-        abh_e=mid+timedelta(minutes=24)
-
-        seg=int((now-sr).total_seconds()/(daymins*60/8))
-        if seg<0: seg=0
-        if seg>7: seg=7
-
-        return jsonify({
-            "date": now.strftime("%Y-%m-%d"),
-            "tithi":safe(TITHI,tithiIndex),
-            "tithi_end":jd_to_local(tithiEnd,tzobj).strftime("%H:%M:%S"),
-            "nakshatra":safe(NAKS,nakIndex),
-            "nakshatra_end":jd_to_local(nakEnd,tzobj).strftime("%H:%M:%S"),
-            "karana":safe(KARANA,tithiIndex*2),
-            "paksha":"Shukla" if tithiIndex<15 else "Krishna",
-            "yoga":yogaIndex+1,
-            "yoga_end":jd_to_local(yogaEnd,tzobj).strftime("%H:%M:%S"),
-            "sunrise":sr.strftime("%H:%M:%S"),
-            "sunset":ss.strftime("%H:%M:%S"),
-            "rahu_kaal":f"{rahu_s.strftime('%H:%M:%S')} - {rahu_e.strftime('%H:%M:%S')}",
-            "yamaganda":f"{yama_s.strftime('%H:%M:%S')} - {yama_e.strftime('%H:%M:%S')}",
-            "gulika":f"{gulika_s.strftime('%H:%M:%S')} - {gulika_e.strftime('%H:%M:%S')}",
-            "abhijit":f"{abh_s.strftime('%H:%M:%S')} - {abh_e.strftime('%H:%M:%S')}",
-            "choghadiya":CHOGH[wd][seg],
-            "moon_rashi":safe(RASHI,int(moon/30)),
-            "ritu":safe(RITU,int(sun/60)),
-            "amanta_month":safe(AMANTA,int(sun/30))
-        })
-
-    except Exception as e:
-        return jsonify({"error":"Panchang Engine Error","details":str(e)}),500
+    return jsonify(out)
