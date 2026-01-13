@@ -4,7 +4,6 @@ import swisseph as swe
 # Render Swiss Ephemeris path
 if os.path.exists("/usr/share/ephe"):
     swe.set_ephe_path("/usr/share/ephe")
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from datetime import datetime, timedelta
@@ -116,7 +115,7 @@ def moon_event(date, lat, lon, tz, flag):
     return None
 
 # ================= EVENT SOLVER =================
-
+for _ in range(50):
 def solve(start, target, fn):
     lo = start
     hi = start + 1
@@ -127,7 +126,6 @@ def solve(start, target, fn):
         else:
             lo = mid
     return hi
-for _ in range(50):
 
 # ================= PANCHANG =================
 
@@ -243,7 +241,6 @@ def api():
     except Exception as e:
         return jsonify({"error":"Panchang Engine Error","details":str(e)}), 500
 
+
 if __name__ == "__main__":
-    app.run()
-
-
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
