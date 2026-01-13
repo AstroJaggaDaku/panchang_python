@@ -12,10 +12,10 @@ if os.path.exists("/usr/share/ephe"):
 app = Flask(__name__)
 CORS(app)
 
-# Lahiri ayanamsa
+# Lahiri Ayanamsa (AstroSage)
 swe.set_sid_mode(swe.SIDM_LAHIRI)
 
-# ================= TABLES =================
+# ---------------- TABLES ----------------
 
 TITHI = [
  "Pratipada","Dvitiya","Tritiya","Chaturthi","Panchami","Shashthi","Saptami","Ashtami",
@@ -52,7 +52,7 @@ RAHU=[8,2,7,5,6,4,3]
 YAMA=[5,4,3,2,1,7,6]
 GULI=[7,6,5,4,3,2,1]
 
-# ================= CORE =================
+# ---------------- CORE ----------------
 
 def jd(dt):
     return swe.julday(dt.year, dt.month, dt.day,
@@ -65,17 +65,15 @@ def safe_calc(j, planet):
     try:
         return swe.calc_ut(j, planet, swe.FLG_SIDEREAL | swe.FLG_SWIEPH)[0][0] % 360
     except:
-        try:
-            return swe.calc_ut(j, planet)[0][0] % 360
-        except:
-            return None
+        return swe.calc_ut(j, planet)[0][0] % 360
 
 def sun_moon(j):
     return safe_calc(j,swe.SUN), safe_calc(j,swe.MOON)
 
-def ang(a,b): return (a-b)%360
+def ang(a,b): 
+    return (a-b)%360
 
-# ================= RISE / SET =================
+# ---------------- RISE / SET ----------------
 
 def safe_rise(j, planet, flag, geo):
     try:
@@ -110,7 +108,7 @@ def moon_event(date,lat,lon,tz,flag):
         if j: return from_jd(j,tz)
     return None
 
-# ================= ASTROSAGE SOLVER =================
+# ---------------- ASTROSAGE EVENT SOLVER ----------------
 
 def forward_solve(j0,target,fn):
     step=0.02
@@ -130,7 +128,7 @@ def forward_solve(j0,target,fn):
         else: lo=mid
     return hi
 
-# ================= PANCHANG =================
+# ---------------- PANCHANG ----------------
 
 def panchang(date,lat,lon,tzname):
     tz=pytz.timezone(tzname)
@@ -148,7 +146,7 @@ def panchang(date,lat,lon,tzname):
 
     t_end=forward_solve(j0,(t+1)*12,lambda j: ang(sun_moon(j)[1],sun_moon(j)[0]))
     n_end=forward_solve(j0,(n+1)*13.3333333333,lambda j: safe_calc(j,swe.MOON))
-    y_end=forward_solve(j0,(y+1)*13.3333333333,lambda j:((safe_calc(j,swe.SUN)or 0)+(safe_calc(j,swe.MOON)or 0))%360)
+    y_end=forward_solve(j0,(y+1)*13.3333333333,lambda j: (safe_calc(j,swe.SUN)+safe_calc(j,swe.MOON))%360)
 
     if t==0 and diff<6: kar="Kimstughna"
     else: kar=KARANA[int((diff-6)/6)%60]
@@ -202,7 +200,7 @@ def panchang(date,lat,lon,tzname):
       "abhijit":f"{abh[0].strftime('%H:%M:%S')} - {abh[1].strftime('%H:%M:%S')}"
     }
 
-# ================= API =================
+# ---------------- API ----------------
 
 @app.route("/panchang")
 def api():
@@ -212,9 +210,10 @@ def api():
         tz=request.args.get("tz","Asia/Kolkata")
         date=request.args.get("date")
 
+        # 🔥 ASTROSAGE FIX — NOON ANCHOR
         if date:
             y,m,d=map(int,date.split("-"))
-            dt=pytz.timezone(tz).localize(datetime(y,m,d,0,0))
+            dt=pytz.timezone(tz).localize(datetime(y,m,d,12,0))
         else:
             dt=datetime.now(pytz.timezone(tz))
 
