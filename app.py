@@ -1,4 +1,10 @@
+import os
 import swisseph as swe
+
+# Render Swiss Ephemeris path
+if os.path.exists("/usr/share/ephe"):
+    swe.set_ephe_path("/usr/share/ephe")
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from datetime import datetime, timedelta
@@ -238,3 +244,4 @@ def api():
 
 if __name__ == "__main__":
     app.run()
+
