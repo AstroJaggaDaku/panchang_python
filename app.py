@@ -5,17 +5,17 @@ from flask_cors import CORS
 from datetime import datetime, timedelta
 import pytz
 
-# Swiss Ephemeris data path for Render
+# Swiss Ephemeris data path (Render / Docker)
 if os.path.exists("/usr/share/ephe"):
     swe.set_ephe_path("/usr/share/ephe")
 
 app = Flask(__name__)
 CORS(app)
 
-# Lahiri Ayanamsa (AstroSage standard)
+# Lahiri ayanamsa
 swe.set_sid_mode(swe.SIDM_LAHIRI)
 
-# ---------------- TABLES ----------------
+# ================= TABLES =================
 
 TITHI = [
  "Pratipada","Dvitiya","Tritiya","Chaturthi","Panchami","Shashthi","Saptami","Ashtami",
@@ -24,7 +24,6 @@ TITHI = [
  "Navami","Dashami","Ekadashi","Dwadashi","Trayodashi","Chaturdashi","Amavasya"
 ]
 
-# 60 Karana Cycle (AstroSage)
 KARANA = (
  ["Kimstughna"] +
  ["Bava","Balava","Kaulava","Taitila","Garaja","Vanija","Vishti"] * 8 +
@@ -49,12 +48,11 @@ AMANTA = ["Chaitra","Vaisakha","Jyeshtha","Ashadha","Shravana","Bhadrapada",
 
 RITU = ["Vasanta","Grishma","Varsha","Sharad","Hemanta","Shishir"]
 
-# Drik Panchang segments (Sunday = 0)
-RAHU = [8,2,7,5,6,4,3]
-YAMA = [5,4,3,2,1,7,6]
-GULI = [7,6,5,4,3,2,1]
+RAHU=[8,2,7,5,6,4,3]
+YAMA=[5,4,3,2,1,7,6]
+GULI=[7,6,5,4,3,2,1]
 
-# ---------------- CORE ----------------
+# ================= CORE =================
 
 def jd(dt):
     return swe.julday(dt.year, dt.month, dt.day,
@@ -63,105 +61,102 @@ def jd(dt):
 def from_jd(j, tz):
     return datetime.fromtimestamp((j - 2440587.5) * 86400, tz)
 
-# Swiss Ephemeris forced (sidereal)
 def safe_calc(j, planet):
     try:
         return swe.calc_ut(j, planet, swe.FLG_SIDEREAL | swe.FLG_SWIEPH)[0][0] % 360
     except:
-        return None
+        try:
+            return swe.calc_ut(j, planet)[0][0] % 360
+        except:
+            return None
 
 def sun_moon(j):
-    return safe_calc(j, swe.SUN), safe_calc(j, swe.MOON)
+    return safe_calc(j,swe.SUN), safe_calc(j,swe.MOON)
 
-def ang(a, b):
-    return (a - b) % 360
+def ang(a,b): return (a-b)%360
 
-# ---------------- RISE / SET ----------------
+# ================= RISE / SET =================
 
 def safe_rise(j, planet, flag, geo):
     try:
         r = swe.rise_trans(j, planet, flag, geo, atpress=0, attemp=0)
-        if r and r[1] and len(r[1]) > 0:
+        if r and r[1] and len(r[1])>0:
             return r[1][0]
     except:
         pass
     return None
 
-def sunrise(date, lat, lon, tz):
-    geo = (lon, lat, 0)
-    base = tz.localize(datetime(date.year, date.month, date.day, 5))
+def sunrise(date,lat,lon,tz):
+    geo=(lon,lat,0)
+    base=tz.localize(datetime(date.year,date.month,date.day,5))
     for h in [0,1,-1]:
-        j = safe_rise(jd(base+timedelta(hours=h)), swe.SUN, swe.CALC_RISE, geo)
-        if j:
-            return from_jd(j, tz)
+        j=safe_rise(jd(base+timedelta(hours=h)),swe.SUN,swe.CALC_RISE,geo)
+        if j: return from_jd(j,tz)
     raise Exception("Sunrise failed")
 
-def sunset(date, lat, lon, tz):
-    geo = (lon, lat, 0)
-    base = tz.localize(datetime(date.year, date.month, date.day, 12))
+def sunset(date,lat,lon,tz):
+    geo=(lon,lat,0)
+    base=tz.localize(datetime(date.year,date.month,date.day,12))
     for h in [0,1,-1]:
-        j = safe_rise(jd(base+timedelta(hours=h)), swe.SUN, swe.CALC_SET, geo)
-        if j:
-            return from_jd(j, tz)
+        j=safe_rise(jd(base+timedelta(hours=h)),swe.SUN,swe.CALC_SET,geo)
+        if j: return from_jd(j,tz)
     raise Exception("Sunset failed")
 
-def moon_event(date, lat, lon, tz, flag):
-    geo = (lon, lat, 0)
-    base = tz.localize(datetime(date.year, date.month, date.day, 6))
+def moon_event(date,lat,lon,tz,flag):
+    geo=(lon,lat,0)
+    base=tz.localize(datetime(date.year,date.month,date.day,6))
     for h in [0,1,-1]:
-        j = safe_rise(jd(base+timedelta(hours=h)), swe.MOON, flag, geo)
-        if j:
-            return from_jd(j, tz)
+        j=safe_rise(jd(base+timedelta(hours=h)),swe.MOON,flag,geo)
+        if j: return from_jd(j,tz)
     return None
 
-# ---------------- SOLVER ----------------
+# ================= ASTROSAGE SOLVER =================
 
-def solve(start, target, fn):
-    lo = start
-    hi = start + 1
-    for _ in range(50):
-        mid = (lo + hi) / 2
-        if (fn(mid) - target + 360) % 360 < 180:
-            hi = mid
-        else:
-            lo = mid
+def forward_solve(j0,target,fn):
+    step=0.02
+    j=j0
+    prev=(fn(j)-target)%360
+    for _ in range(2000):
+        j+=step
+        cur=(fn(j)-target)%360
+        if prev>300 and cur<60:
+            lo=j-step; hi=j
+            break
+        prev=cur
+    for _ in range(40):
+        mid=(lo+hi)/2
+        v=(fn(mid)-target)%360
+        if v<180: hi=mid
+        else: lo=mid
     return hi
 
-# ---------------- PANCHANG ----------------
+# ================= PANCHANG =================
 
-def panchang(date, lat, lon, tzname):
-    tz = pytz.timezone(tzname)
+def panchang(date,lat,lon,tzname):
+    tz=pytz.timezone(tzname)
 
-    sr = sunrise(date, lat, lon, tz)
-    ss = sunset(date, lat, lon, tz)
+    sr=sunrise(date,lat,lon,tz)
+    ss=sunset(date,lat,lon,tz)
 
-    j0 = jd(sr)
-    sun, moon = sun_moon(j0)
+    j0=jd(sr)
+    sun,moon=sun_moon(j0)
 
-    if sun is None or moon is None:
-        sun = swe.calc_ut(j0, swe.SUN)[0][0] % 360
-        moon = swe.calc_ut(j0, swe.MOON)[0][0] % 360
+    diff=ang(moon,sun)
+    t=int(diff/12)
+    n=int(moon/13.3333333333)
+    y=int(((sun+moon)%360)/13.3333333333)
 
-    diff = ang(moon, sun)
+    t_end=forward_solve(j0,(t+1)*12,lambda j: ang(sun_moon(j)[1],sun_moon(j)[0]))
+    n_end=forward_solve(j0,(n+1)*13.3333333333,lambda j: safe_calc(j,swe.MOON))
+    y_end=forward_solve(j0,(y+1)*13.3333333333,lambda j:((safe_calc(j,swe.SUN)or 0)+(safe_calc(j,swe.MOON)or 0))%360)
 
-    t = int(diff/12)
-    n = int(moon/13.3333333333)
-    y = int(((sun+moon)%360)/13.3333333333)
+    if t==0 and diff<6: kar="Kimstughna"
+    else: kar=KARANA[int((diff-6)/6)%60]
 
-    t_end = solve(j0, (t+1)*12, lambda j: ang(sun_moon(j)[1], sun_moon(j)[0]))
-    n_end = solve(j0, (n+1)*13.3333333333, lambda j: (safe_calc(j,swe.MOON) - n*13.3333333333)%360)
-    y_end = solve(j0, (y+1)*13.3333333333, lambda j: ((safe_calc(j,swe.SUN) or 0)+(safe_calc(j,swe.MOON) or 0))%360)
-
-    # Karana
-    if t==0 and diff<6:
-        kar="Kimstughna"
-    else:
-        kar=KARANA[int((diff-6)/6)%60]
-
-    ama = solve(j0,0,lambda j: ang(sun_moon(j)[1],sun_moon(j)[0]))
-    sun_ama = safe_calc(ama,swe.SUN)
-    amanta = AMANTA[int(sun_ama//30)%12]
-    purni = AMANTA[(int(sun_ama//30)+1)%12]
+    ama=forward_solve(j0,0,lambda j: ang(sun_moon(j)[1],sun_moon(j)[0]))
+    sun_ama=safe_calc(ama,swe.SUN)
+    amanta=AMANTA[int(sun_ama//30)%12]
+    purni=AMANTA[(int(sun_ama//30)+1)%12]
 
     vikram=date.year+57
     shaka=date.year-78
@@ -172,9 +167,7 @@ def panchang(date, lat, lon, tzname):
 
     mins=dur.total_seconds()/60
     wd=(sr.weekday()+1)%7
-    def seg(n):
-        return (sr+timedelta(minutes=(n-1)*mins/8),
-                sr+timedelta(minutes=n*mins/8))
+    def seg(n): return (sr+timedelta(minutes=(n-1)*mins/8),sr+timedelta(minutes=n*mins/8))
 
     rahu=seg(RAHU[wd]); yama=seg(YAMA[wd]); guli=seg(GULI[wd])
 
@@ -182,34 +175,34 @@ def panchang(date, lat, lon, tzname):
     ms=moon_event(date,lat,lon,tz,swe.CALC_SET)
 
     return {
-      "date": sr.strftime("%Y-%m-%d"),
-      "day": sr.strftime("%A"),
-      "tithi": TITHI[t],
-      "tithi_end": from_jd(t_end,tz).strftime("%H:%M:%S"),
-      "nakshatra": NAKS[n],
-      "nakshatra_end": from_jd(n_end,tz).strftime("%H:%M:%S"),
-      "yoga": YOGAS[y],
-      "yoga_end": from_jd(y_end,tz).strftime("%H:%M:%S"),
-      "karana": kar,
-      "paksha": "Krishna" if t>=15 else "Shukla",
-      "sunrise": sr.strftime("%H:%M:%S"),
-      "sunset": ss.strftime("%H:%M:%S"),
-      "moonrise": mr.strftime("%H:%M:%S") if mr else None,
-      "moonset": ms.strftime("%H:%M:%S") if ms else None,
-      "moon_sign": RASHI[int(moon//30)%12],
-      "amanta_month": amanta,
-      "purnimanta_month": purni,
-      "ritu": RITU[int(sun//60)%6],
-      "vikram_samvat": vikram,
-      "shaka_samvat": shaka,
-      "kali_samvat": kali,
-      "rahu_kalam": f"{rahu[0].strftime('%H:%M:%S')} - {rahu[1].strftime('%H:%M:%S')}",
-      "yamaganda": f"{yama[0].strftime('%H:%M:%S')} - {yama[1].strftime('%H:%M:%S')}",
-      "gulika": f"{guli[0].strftime('%H:%M:%S')} - {guli[1].strftime('%H:%M:%S')}",
-      "abhijit": f"{abh[0].strftime('%H:%M:%S')} - {abh[1].strftime('%H:%M:%S')}"
+      "date":sr.strftime("%Y-%m-%d"),
+      "day":sr.strftime("%A"),
+      "tithi":TITHI[t],
+      "tithi_end":from_jd(t_end,tz).strftime("%H:%M:%S"),
+      "nakshatra":NAKS[n],
+      "nakshatra_end":from_jd(n_end,tz).strftime("%H:%M:%S"),
+      "yoga":YOGAS[y],
+      "yoga_end":from_jd(y_end,tz).strftime("%H:%M:%S"),
+      "karana":kar,
+      "paksha":"Krishna" if t>=15 else "Shukla",
+      "sunrise":sr.strftime("%H:%M:%S"),
+      "sunset":ss.strftime("%H:%M:%S"),
+      "moonrise":mr.strftime("%H:%M:%S") if mr else None,
+      "moonset":ms.strftime("%H:%M:%S") if ms else None,
+      "moon_sign":RASHI[int(moon//30)%12],
+      "amanta_month":amanta,
+      "purnimanta_month":purni,
+      "ritu":RITU[int(sun//60)%6],
+      "vikram_samvat":vikram,
+      "shaka_samvat":shaka,
+      "kali_samvat":kali,
+      "rahu_kalam":f"{rahu[0].strftime('%H:%M:%S')} - {rahu[1].strftime('%H:%M:%S')}",
+      "yamaganda":f"{yama[0].strftime('%H:%M:%S')} - {yama[1].strftime('%H:%M:%S')}",
+      "gulika":f"{guli[0].strftime('%H:%M:%S')} - {guli[1].strftime('%H:%M:%S')}",
+      "abhijit":f"{abh[0].strftime('%H:%M:%S')} - {abh[1].strftime('%H:%M:%S')}"
     }
 
-# ---------------- API ----------------
+# ================= API =================
 
 @app.route("/panchang")
 def api():
