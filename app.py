@@ -127,6 +127,7 @@ def solve(start, target, fn):
         else:
             lo = mid
     return hi
+for _ in range(50):
 
 # ================= PANCHANG =================
 
@@ -244,4 +245,5 @@ def api():
 
 if __name__ == "__main__":
     app.run()
+
 
