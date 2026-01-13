@@ -2,3 +2,4 @@ flask
 pyswisseph
 pytz
 gunicorn
+tzdata
