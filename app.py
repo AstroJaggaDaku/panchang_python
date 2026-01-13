@@ -5,7 +5,7 @@ from flask_cors import CORS
 from datetime import datetime, timedelta
 import pytz
 
-# Swiss Ephemeris data path (Render / Docker)
+# Swiss Ephemeris data path
 if os.path.exists("/usr/share/ephe"):
     swe.set_ephe_path("/usr/share/ephe")
 
@@ -15,7 +15,7 @@ CORS(app)
 # Lahiri Ayanamsa (AstroSage)
 swe.set_sid_mode(swe.SIDM_LAHIRI)
 
-# ---------------- TABLES ----------------
+# ================= TABLES =================
 
 TITHI = [
  "Pratipada","Dvitiya","Tritiya","Chaturthi","Panchami","Shashthi","Saptami","Ashtami",
@@ -52,63 +52,63 @@ RAHU=[8,2,7,5,6,4,3]
 YAMA=[5,4,3,2,1,7,6]
 GULI=[7,6,5,4,3,2,1]
 
-# ---------------- CORE ----------------
+# ================= CORE =================
 
 def jd(dt):
-    return swe.julday(dt.year, dt.month, dt.day,
-                      dt.hour + dt.minute/60 + dt.second/3600)
+    return swe.julday(dt.year,dt.month,dt.day,
+                      dt.hour+dt.minute/60+dt.second/3600)
 
-def from_jd(j, tz):
-    return datetime.fromtimestamp((j - 2440587.5) * 86400, tz)
+def from_jd(j,tz):
+    return datetime.fromtimestamp((j-2440587.5)*86400,tz)
 
-def safe_calc(j, planet):
+def safe_calc(j,p):
     try:
-        return swe.calc_ut(j, planet, swe.FLG_SIDEREAL | swe.FLG_SWIEPH)[0][0] % 360
+        return swe.calc_ut(j,p,swe.FLG_SIDEREAL|swe.FLG_SWIEPH)[0][0]%360
     except:
-        return swe.calc_ut(j, planet)[0][0] % 360
+        return swe.calc_ut(j,p)[0][0]%360
 
 def sun_moon(j):
     return safe_calc(j,swe.SUN), safe_calc(j,swe.MOON)
 
-def ang(a,b): 
+def ang(a,b):
     return (a-b)%360
 
-# ---------------- RISE / SET ----------------
+# ================= RISE / SET =================
 
-def safe_rise(j, planet, flag, geo):
+def safe_rise(j,p,flag,geo):
     try:
-        r = swe.rise_trans(j, planet, flag, geo, atpress=0, attemp=0)
+        r=swe.rise_trans(j,p,flag,geo,atpress=0,attemp=0)
         if r and r[1] and len(r[1])>0:
             return r[1][0]
     except:
         pass
     return None
 
-def sunrise(date,lat,lon,tz):
+def sunrise(dt,lat,lon,tz):
     geo=(lon,lat,0)
-    base=tz.localize(datetime(date.year,date.month,date.day,5))
+    base=tz.localize(datetime(dt.year,dt.month,dt.day,5))
     for h in [0,1,-1]:
         j=safe_rise(jd(base+timedelta(hours=h)),swe.SUN,swe.CALC_RISE,geo)
         if j: return from_jd(j,tz)
     raise Exception("Sunrise failed")
 
-def sunset(date,lat,lon,tz):
+def sunset(dt,lat,lon,tz):
     geo=(lon,lat,0)
-    base=tz.localize(datetime(date.year,date.month,date.day,12))
+    base=tz.localize(datetime(dt.year,dt.month,dt.day,12))
     for h in [0,1,-1]:
         j=safe_rise(jd(base+timedelta(hours=h)),swe.SUN,swe.CALC_SET,geo)
         if j: return from_jd(j,tz)
     raise Exception("Sunset failed")
 
-def moon_event(date,lat,lon,tz,flag):
+def moon_event(dt,lat,lon,tz,flag):
     geo=(lon,lat,0)
-    base=tz.localize(datetime(date.year,date.month,date.day,6))
+    base=tz.localize(datetime(dt.year,dt.month,dt.day,6))
     for h in [0,1,-1]:
         j=safe_rise(jd(base+timedelta(hours=h)),swe.MOON,flag,geo)
         if j: return from_jd(j,tz)
     return None
 
-# ---------------- ASTROSAGE EVENT SOLVER ----------------
+# ================= ASTROSAGE EVENT SOLVER =================
 
 def forward_solve(j0,target,fn):
     step=0.02
@@ -123,18 +123,26 @@ def forward_solve(j0,target,fn):
         prev=cur
     for _ in range(40):
         mid=(lo+hi)/2
-        v=(fn(mid)-target)%360
-        if v<180: hi=mid
+        if (fn(mid)-target)%360<180: hi=mid
         else: lo=mid
     return hi
 
-# ---------------- PANCHANG ----------------
+# ================= ASTROSAGE DATE RESOLVER =================
 
-def panchang(date,lat,lon,tzname):
+def resolve_vedic_date(y,m,d,tz,lat,lon):
+    civil = tz.localize(datetime(y,m,d,0,0))
+    sr = sunrise(civil,lat,lon,tz)
+    if civil < sr:
+        civil -= timedelta(days=1)
+    return civil
+
+# ================= PANCHANG =================
+
+def panchang(dt,lat,lon,tzname):
     tz=pytz.timezone(tzname)
 
-    sr=sunrise(date,lat,lon,tz)
-    ss=sunset(date,lat,lon,tz)
+    sr=sunrise(dt,lat,lon,tz)
+    ss=sunset(dt,lat,lon,tz)
 
     j0=jd(sr)
     sun,moon=sun_moon(j0)
@@ -144,33 +152,28 @@ def panchang(date,lat,lon,tzname):
     n=int(moon/13.3333333333)
     y=int(((sun+moon)%360)/13.3333333333)
 
-    t_end=forward_solve(j0,(t+1)*12,lambda j: ang(sun_moon(j)[1],sun_moon(j)[0]))
-    n_end=forward_solve(j0,(n+1)*13.3333333333,lambda j: safe_calc(j,swe.MOON))
-    y_end=forward_solve(j0,(y+1)*13.3333333333,lambda j: (safe_calc(j,swe.SUN)+safe_calc(j,swe.MOON))%360)
+    t_end=forward_solve(j0,(t+1)*12,lambda j:ang(sun_moon(j)[1],sun_moon(j)[0]))
+    n_end=forward_solve(j0,(n+1)*13.3333333333,lambda j:safe_calc(j,swe.MOON))
+    y_end=forward_solve(j0,(y+1)*13.3333333333,lambda j:(safe_calc(j,swe.SUN)+safe_calc(j,swe.MOON))%360)
 
     if t==0 and diff<6: kar="Kimstughna"
     else: kar=KARANA[int((diff-6)/6)%60]
 
-    ama=forward_solve(j0,0,lambda j: ang(sun_moon(j)[1],sun_moon(j)[0]))
+    ama=forward_solve(j0,0,lambda j:ang(sun_moon(j)[1],sun_moon(j)[0]))
     sun_ama=safe_calc(ama,swe.SUN)
     amanta=AMANTA[int(sun_ama//30)%12]
     purni=AMANTA[(int(sun_ama//30)+1)%12]
 
-    vikram=date.year+57
-    shaka=date.year-78
-    kali=date.year+3101
-
     dur=ss-sr
-    abh=(sr+dur*(7/15),sr+dur*(8/15))
-
     mins=dur.total_seconds()/60
     wd=(sr.weekday()+1)%7
+
     def seg(n): return (sr+timedelta(minutes=(n-1)*mins/8),sr+timedelta(minutes=n*mins/8))
 
     rahu=seg(RAHU[wd]); yama=seg(YAMA[wd]); guli=seg(GULI[wd])
 
-    mr=moon_event(date,lat,lon,tz,swe.CALC_RISE)
-    ms=moon_event(date,lat,lon,tz,swe.CALC_SET)
+    mr=moon_event(dt,lat,lon,tz,swe.CALC_RISE)
+    ms=moon_event(dt,lat,lon,tz,swe.CALC_SET)
 
     return {
       "date":sr.strftime("%Y-%m-%d"),
@@ -191,33 +194,34 @@ def panchang(date,lat,lon,tzname):
       "amanta_month":amanta,
       "purnimanta_month":purni,
       "ritu":RITU[int(sun//60)%6],
-      "vikram_samvat":vikram,
-      "shaka_samvat":shaka,
-      "kali_samvat":kali,
+      "vikram_samvat":dt.year+57,
+      "shaka_samvat":dt.year-78,
+      "kali_samvat":dt.year+3101,
       "rahu_kalam":f"{rahu[0].strftime('%H:%M:%S')} - {rahu[1].strftime('%H:%M:%S')}",
       "yamaganda":f"{yama[0].strftime('%H:%M:%S')} - {yama[1].strftime('%H:%M:%S')}",
       "gulika":f"{guli[0].strftime('%H:%M:%S')} - {guli[1].strftime('%H:%M:%S')}",
-      "abhijit":f"{abh[0].strftime('%H:%M:%S')} - {abh[1].strftime('%H:%M:%S')}"
+      "abhijit":f"{(sr+dur*(7/15)).strftime('%H:%M:%S')} - {(sr+dur*(8/15)).strftime('%H:%M:%S')}"
     }
 
-# ---------------- API ----------------
+# ================= API =================
 
 @app.route("/panchang")
 def api():
     try:
         lat=float(request.args.get("lat",22.5726))
         lon=float(request.args.get("lon",88.3639))
-        tz=request.args.get("tz","Asia/Kolkata")
+        tzname=request.args.get("tz","Asia/Kolkata")
+        tz=pytz.timezone(tzname)
+
         date=request.args.get("date")
 
-        # 🔥 ASTROSAGE FIX — NOON ANCHOR
         if date:
             y,m,d=map(int,date.split("-"))
-            dt=pytz.timezone(tz).localize(datetime(y,m,d,12,0))
+            dt=resolve_vedic_date(y,m,d,tz,lat,lon)
         else:
-            dt=datetime.now(pytz.timezone(tz))
+            dt=datetime.now(tz)
 
-        return jsonify(panchang(dt,lat,lon,tz))
+        return jsonify(panchang(dt,lat,lon,tzname))
     except Exception as e:
         return jsonify({"error":"Panchang Engine Error","details":str(e)}),500
 
