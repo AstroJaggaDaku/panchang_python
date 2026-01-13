@@ -115,7 +115,7 @@ def moon_event(date, lat, lon, tz, flag):
     return None
 
 # ================= EVENT SOLVER =================
-for _ in range(50):
+
 def solve(start, target, fn):
     lo = start
     hi = start + 1
@@ -244,3 +244,4 @@ def api():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
