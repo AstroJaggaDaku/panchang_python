@@ -135,9 +135,16 @@ def panchang(date, lat, lon, tzname):
     # Sunrise anchored Vedic day
     sr = sunrise(date, lat, lon, tz)
     ss = sunset(date, lat, lon, tz)
-
+    
     j0 = jd(sr)
     sun, moon = sun_moon(j0)
+
+    if sun is None or moon is None:
+    # fallback to Moshier if ephemeris missing
+    sun = swe.calc_ut(j0, swe.SUN)[0][0] % 360
+    moon = swe.calc_ut(j0, swe.MOON)[0][0] % 360
+
+
     diff = ang(moon, sun)
 
     t = int(diff / 12)
@@ -146,10 +153,11 @@ def panchang(date, lat, lon, tzname):
 
     # --- Exact ends ---
     t_end = solve(j0, (t+1)*12, lambda j: ang(sun_moon(j)[1], sun_moon(j)[0]))
-    n_end = solve(j0, (n+1)*13.3333333333,
-                  lambda j: (safe_calc(j, swe.MOON) - n*13.3333333333) % 360)
+   n_end = solve(j0, (n+1)*13.3333333333,
+              lambda j: safe_calc(j, swe.MOON) % 360)
     y_end = solve(j0, (y+1)*13.3333333333,
-                  lambda j: ((safe_calc(j, swe.SUN) or 0) + (safe_calc(j, swe.MOON) or 0)) % 360)
+              lambda j: (safe_calc(j, swe.SUN) + safe_calc(j, swe.MOON)) % 360)
+
 
     # Karana
     if t == 0 and diff < 6:
@@ -209,7 +217,7 @@ def panchang(date, lat, lon, tzname):
 
       "amanta_month": amanta,
       "purnimanta_month": purni,
-      "ritu": RITU[int(sun // 60)],
+      "ritu": RITU[int(sun // 60) % 6],
 
       "vikram_samvat": vikram,
       "shaka_samvat": shaka,
@@ -244,4 +252,5 @@ def api():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
 
