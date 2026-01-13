@@ -1,5 +1,5 @@
 FROM python:3.11-slim
-
+apt-get update && apt-get install -y swisseph-data
 RUN apt-get update && apt-get install -y \
     libsqlite3-0 \
     libgl1 \
