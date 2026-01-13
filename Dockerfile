@@ -1,11 +1,15 @@
 FROM python:3.11-slim
 
+# System packages + Swiss Ephemeris data
 RUN apt-get update && apt-get install -y \
     gcc \
-    libglib2.0-0 \
-    libgl1 \
     tzdata \
+    ca-certificates \
+    swisseph-data \
     && rm -rf /var/lib/apt/lists/*
+
+# Swiss Ephemeris data location
+ENV SE_EPHE_PATH=/usr/share/ephe
 
 WORKDIR /app
 
